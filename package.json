@@ -1,0 +1,31 @@
+{
+  "name": "scoreboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-sport live score platform (event-sourced microservices)",
+  "workspaces": [
+    "libs/*",
+    "services/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "db:migrate": "docker exec -i scoreboard-postgres psql -U scoreboard -d scoreboard < infra/init.sql",
+    "ingestion": "npm -w @scoreboard/ingestion run dev",
+    "match-engine": "npm -w @scoreboard/match-engine run dev",
+    "realtime-gateway": "npm -w @scoreboard/realtime-gateway run dev",
+    "api-gateway": "npm -w @scoreboard/api-gateway run dev",
+    "web": "npm -w @scoreboard/web run dev",
+    "adapter:cricket": "npm -w @scoreboard/cricket-adapter run start",
+    "adapter:cricket:mock": "MOCK_FILE=services/cricket-adapter/mock/currentMatches.json POLL_MS=3000 npm -w @scoreboard/cricket-adapter run start",
+    "demo": "npm -w @scoreboard/ingestion run demo",
+    "demo:football": "npm -w @scoreboard/ingestion run demo:football",
+    "demo:tennis": "npm -w @scoreboard/ingestion run demo:tennis"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.1",
+    "@types/express": "^5.0.0"
+  }
+}

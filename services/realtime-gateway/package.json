@@ -1,0 +1,13 @@
+{
+  "name": "@scoreboard/realtime-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@scoreboard/events": "0.1.0",
+    "express": "^5.0.1",
+    "ioredis": "^5.4.1"
+  }
+}

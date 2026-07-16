@@ -1,0 +1,40 @@
+{
+  "apikey": "MOCK",
+  "data": [
+    {
+      "id": "d1e2f3a4-0000-4000-8000-000000000001",
+      "name": "India vs Australia, 2nd ODI",
+      "matchType": "odi",
+      "status": "Australia opt to bowl",
+      "venue": "M. A. Chidambaram Stadium, Chennai",
+      "date": "2026-07-16",
+      "dateTimeGMT": "2026-07-16T08:30:00",
+      "teams": ["India", "Australia"],
+      "teamInfo": [
+        { "name": "India", "shortname": "IND", "img": "https://example/ind.png" },
+        { "name": "Australia", "shortname": "AUS", "img": "https://example/aus.png" }
+      ],
+      "score": [
+        { "r": 212, "w": 4, "o": 38.2, "inning": "India Inning 1" }
+      ],
+      "matchStarted": true,
+      "matchEnded": false
+    },
+    {
+      "id": "d1e2f3a4-0000-4000-8000-000000000002",
+      "name": "England vs New Zealand, T20",
+      "matchType": "t20",
+      "status": "Match not started",
+      "teams": ["England", "New Zealand"],
+      "teamInfo": [
+        { "name": "England", "shortname": "ENG" },
+        { "name": "New Zealand", "shortname": "NZ" }
+      ],
+      "score": [],
+      "matchStarted": false,
+      "matchEnded": false
+    }
+  ],
+  "status": "success",
+  "info": { "hitsToday": 3, "hitsUsed": 1, "hitsLimit": 100, "server": 8, "queryTime": 21.4 }
+}

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ScoreBoard — Live</title>
+<style>
+  :root { --bg:#0f1620; --card:#182430; --line:#243444; --ink:#e8eef5; --dim:#8aa0b4; --accent:#22c55e; --hot:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  .live-dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 0 var(--accent); animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)} 70%{box-shadow:0 0 0 8px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
+  .wrap { max-width:820px; margin:0 auto; padding:20px; display:grid; gap:18px; }
+  .matches { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:7px 14px; cursor:pointer; font-size:13px; }
+  .chip.active { border-color:var(--accent); color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+  .teams { display:flex; justify-content:space-between; align-items:flex-start; }
+  .team { font-size:15px; color:var(--dim); }
+  .score { font-size:44px; font-weight:700; letter-spacing:-1px; }
+  .score small { font-size:20px; color:var(--dim); font-weight:600; }
+  .meta { display:flex; gap:18px; margin-top:10px; color:var(--dim); font-size:13px; }
+  .meta b { color:var(--ink); font-weight:600; }
+  .status { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--accent); display:flex; align-items:center; gap:6px; }
+  h3 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin:0 0 8px; }
+  .feed { display:flex; flex-direction:column; gap:0; max-height:340px; overflow:auto; }
+  .ball { display:flex; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .ball:first-child { animation:flash 1s ease; }
+  @keyframes flash { from{background:rgba(34,197,94,.12)} to{background:transparent} }
+  .ov { color:var(--dim); min-width:42px; font-variant-numeric:tabular-nums; }
+  .rundot { min-width:26px; height:26px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; background:#0d1520; }
+  .rundot.four { background:#1d4ed8; } .rundot.six { background:#7c3aed; } .rundot.w { background:#dc2626; }
+  .empty { color:var(--dim); padding:30px; text-align:center; }
+</style>
+</head>
+<body>
+<header><span class="live-dot"></span><h1>SCOREBOARD · Live</h1><a href="/scorer.html" style="margin-left:auto;color:#8aa0b4;font-size:13px;text-decoration:none">✎ manual scorer</a></header>
+<div class="wrap">
+  <div class="matches" id="matches"></div>
+  <div id="board"><div class="card empty">Pick a live match above.</div></div>
+</div>
+
+<script>
+const API = "http://localhost:4004";
+const RT  = "http://localhost:4003";
+let es = null;
+
+async function loadMatches() {
+  const r = await fetch(`${API}/matches`);
+  const list = await r.json();
+  const el = document.getElementById("matches");
+  el.innerHTML = "";
+  list.forEach(m => {
+    const c = document.createElement("div");
+    c.className = "chip";
+    c.textContent = `${m.sport_id} · ${m.status}`;
+    c.onclick = () => open(m.id, c);
+    el.appendChild(c);
+  });
+  if (list[0]) el.firstChild.click();
+}
+
+let currentSport = "cricket";
+
+async function open(id, chip) {
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  const m = await (await fetch(`${API}/matches/${id}`)).json();
+  currentSport = m.sport_id;
+  renderBoard(m);
+  const ev = await (await fetch(`${API}/matches/${id}/events?after=0`)).json();
+  renderFeed(ev.reverse());
+  connect(id);
+}
+
+// ── Renderer registry, keyed by sport (frontend mirror of the backend plugins).
+// Each renderer knows how to turn a scoreboard JSON into score/sub/meta HTML and
+// how to draw one event row. Add a sport = add an entry. No other UI change.
+const RENDERERS = {
+  cricket: {
+    score(sb){ const i=inn(sb); return `${i.runs}<small>/${i.wickets}</small>`; },
+    sub(sb, a){ return `${a} <span style="color:#22c55e">batting</span>`; },
+    meta(sb){ const i=inn(sb); return `<span>Overs <b>${i.overs??0}</b></span><span>RR <b>${i.runRate??0}</b></span>${sb.target?`<span>Target <b>${sb.target}</b></span>`:""}`; },
+    row(e){ const r=(e.payload||{}).runs; let cls="rundot",label=r??"•";
+      if(e.type==="wicket"){cls+=" w";label="W";} else if(r===4){cls+=" four";} else if(r===6){cls+=" six";}
+      const p=e.period||{}, ov=p.over!=null?`${p.over}.${p.ball||""}`:"";
+      return `<span class="ov">${ov}</span><span class="${cls}">${label}</span><span>${e.commentary?.text||""}</span>`; },
+  },
+  football: {
+    score(sb){ return `${sb.score?.home??0}<small> - </small>${sb.score?.away??0}`; },
+    sub(sb, a, b){ return `${a} <span style="color:var(--dim)">vs</span> ${b}`; },
+    meta(sb){ const c=sb.clock||{}; return `<span>Half <b>${c.half??1}</b></span><span>Minute <b>${c.minute??0}'</b></span>`; },
+    row(e){ const p=e.period||{}, mn=p.minute!=null?`${p.minute}'`:"";
+      let cls="rundot",label="•"; if(e.type==="goal"){cls+=" six";label="⚽";} else if(e.type==="card"){cls+=" w";label="▮";}
+      return `<span class="ov">${mn}</span><span class="${cls}">${label}</span><span>${e.commentary?.text||e.type}</span>`; },
+  },
+  tennis: {
+    score(sb){ const sets=(sb.sets||[]).map(s=>`${s.a}-${s.b}`).join("  "); const g=sb.currentGame||{a:"0",b:"0"};
+      return `${sets||"0-0"}<small>&nbsp;·&nbsp;${g.a}-${g.b}</small>`; },
+    sub(sb, a, b){ return `${a} <span style="color:var(--dim)">vs</span> ${b}`; },
+    meta(sb){ return `<span>Serving <b>${sb.serving||"A"}</b></span><span>Best of <b>${sb.bestOf||3}</b></span>`; },
+    row(e){ const label=e.type==="point"?"•":"◆", cls=e.type==="set_won"?"rundot four":"rundot";
+      return `<span class="ov"></span><span class="${cls}">${label}</span><span>${e.commentary?.text||e.type}</span>`; },
+  },
+};
+const inn = sb => (sb.innings||[])[(sb.currentInnings||1)-1] || {runs:0,wickets:0,overs:0,runRate:0};
+const R = () => RENDERERS[currentSport] || RENDERERS.cricket;
+
+function renderBoard(m) {
+  const p = m.participants || [];
+  const a = p.find(x => x.side === "A")?.name || "Home";
+  const b = p.find(x => x.side === "B")?.name || "Away";
+  const sb = m.scoreboard || {};
+  const r = R();
+  document.getElementById("board").innerHTML = `
+    <div class="card">
+      <div class="status"><span class="live-dot"></span>${m.sport_id} · ${m.status}</div>
+      <div style="margin-top:10px" class="team" id="sub">${r.sub(sb,a,b)}</div>
+      <div class="score" id="mainscore" style="margin-top:4px">${r.score(sb)}</div>
+      <div class="meta" id="meta">${r.meta(sb)}</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Commentary</h3>
+      <div class="feed" id="feed"><div class="empty">waiting for action…</div></div>
+    </div>`;
+}
+
+function renderFeed(events) {
+  const feed = document.getElementById("feed");
+  if (!feed) return;
+  feed.innerHTML = "";
+  events.filter(e => e.commentary).forEach(e => feed.appendChild(eventRow(e)));
+  if (!feed.children.length) feed.innerHTML = '<div class="empty">waiting for action…</div>';
+}
+
+function eventRow(e) {
+  const row = document.createElement("div");
+  row.className = "ball";
+  row.innerHTML = R().row(e);
+  return row;
+}
+
+function connect(id) {
+  if (es) es.close();
+  es = new EventSource(`${RT}/matches/${id}/stream`);
+  es.addEventListener("update", ev => {
+    const u = JSON.parse(ev.data);
+    const sb = u.scoreboard, r = R();
+    const ms = document.getElementById("mainscore"); if (ms) ms.innerHTML = r.score(sb);
+    const meta = document.getElementById("meta"); if (meta) meta.innerHTML = r.meta(sb);
+    const feed = document.getElementById("feed");
+    if (feed && u.commentary) {
+      if (feed.querySelector(".empty")) feed.innerHTML = "";
+      feed.insertBefore(eventRow({ period:u.period||{}, type:u.type, payload:u.payload||{}, commentary:u.commentary }), feed.firstChild);
+    }
+  });
+}
+
+loadMatches();
+setInterval(loadMatches, 15000);
+</script>
+</body>
+</html>

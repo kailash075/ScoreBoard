@@ -1,0 +1,16 @@
+{
+  "name": "@scoreboard/ingestion",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "demo": "tsx src/demo-feed.ts cricket",
+    "demo:football": "tsx src/demo-feed.ts football",
+    "demo:tennis": "tsx src/demo-feed.ts tennis"
+  },
+  "dependencies": {
+    "@scoreboard/events": "0.1.0",
+    "express": "^5.0.1",
+    "kafkajs": "^2.2.4"
+  }
+}

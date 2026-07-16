@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ScoreBoard — Manual Scorer</title>
+<style>
+  :root { --bg:#0f1620; --card:#182430; --line:#243444; --ink:#e8eef5; --dim:#8aa0b4; --accent:#22c55e; --blue:#1d4ed8; --purple:#7c3aed; --red:#dc2626; --amber:#f59e0b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:16px; margin:0; letter-spacing:.5px; }
+  header .right { margin-left:auto; color:var(--dim); font-size:13px; display:flex; gap:12px; align-items:center; }
+  header a, .link { color:var(--dim); font-size:13px; text-decoration:none; cursor:pointer; background:none; border:none; }
+  .wrap { max-width:560px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .matches { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:7px 13px; cursor:pointer; font-size:13px; }
+  .chip.active { border-color:var(--accent); color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; }
+  .score { font-size:38px; font-weight:700; letter-spacing:-1px; }
+  .score small { font-size:18px; color:var(--dim); font-weight:600; }
+  .subline { color:var(--dim); font-size:13px; margin-top:2px; }
+  h3 { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin:0 0 10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .grid.g3 { grid-template-columns:repeat(3,1fr); } .grid.g2 { grid-template-columns:repeat(2,1fr); }
+  button.tap { border:none; border-radius:12px; padding:18px 0; font-size:20px; font-weight:700; color:#fff; background:#233240; cursor:pointer; transition:transform .05s; }
+  button.tap:active { transform:scale(.94); }
+  button.tap.four { background:var(--blue); } button.tap.six { background:var(--purple); }
+  button.tap.w { background:var(--red); } button.tap.extra { background:#334155; font-size:15px; }
+  button.tap.goal { background:var(--accent); } button.tap.amber { background:var(--amber); color:#111; }
+  button.tap.sm { font-size:14px; padding:14px 0; } button.tap.mini { font-size:13px; padding:5px 11px; border-radius:8px; }
+  button.tap.undo { background:#3a2a12; color:var(--amber); border:1px solid var(--amber); }
+  .log { max-height:180px; overflow:auto; font-size:13px; }
+  .log div { padding:6px 0; border-bottom:1px solid var(--line); color:var(--dim); }
+  .log b { color:var(--ink); } .log .void { color:var(--amber); }
+  .empty { color:var(--dim); text-align:center; padding:24px; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--accent); color:#062; padding:8px 16px; border-radius:999px; font-weight:600; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; }
+  .toast.show { opacity:1; } .toast.err { background:var(--red); color:#fff; }
+  .login { max-width:340px; margin:60px auto; }
+  .login input { width:100%; padding:12px; margin:6px 0; border-radius:10px; border:1px solid var(--line); background:#0d1520; color:var(--ink); font-size:15px; }
+  .login button { width:100%; padding:13px; margin-top:8px; border:none; border-radius:10px; background:var(--accent); color:#062; font-weight:700; font-size:15px; cursor:pointer; }
+  .hint { color:var(--dim); font-size:12px; text-align:center; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⛳ MANUAL SCORER</h1>
+  <div class="right" id="who"></div>
+</header>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "http://localhost:4004";
+const RT  = "http://localhost:4003";
+const MANUAL = "http://localhost:4001/ingest/manual";
+const LOGIN  = "http://localhost:4001/auth/login";
+
+let token = localStorage.getItem("scorer_token") || "";
+let scorerId = localStorage.getItem("scorer_id") || "";
+let match = null, es = null;
+// authoritative cricket state, seeded from the SSE scoreboard (no client counter of truth)
+let cricketBalls = 0, cricketInnings = 1;
+let football = { half: 1, minute: 0 }, tennis = { set: 1 };
+
+// ── Auth gate ───────────────────────────────────────────────────────────
+function renderWho() {
+  document.getElementById("who").innerHTML = token
+    ? `<span>scorer: <b style="color:#e8eef5">${scorerId}</b></span><a href="/">live view</a><button class="link" onclick="logout()">logout</button>`
+    : `<a href="/">live view</a>`;
+}
+function logout() { token = ""; scorerId = ""; localStorage.removeItem("scorer_token"); localStorage.removeItem("scorer_id"); boot(); }
+
+function renderLogin(msg) {
+  renderWho();
+  document.getElementById("app").innerHTML = `
+    <div class="wrap"><div class="card login">
+      <h3>Scorer sign in</h3>
+      <input id="u" placeholder="username" autocomplete="username" />
+      <input id="p" type="password" placeholder="password" autocomplete="current-password" />
+      <button onclick="doLogin()">Sign in</button>
+      ${msg ? `<div class="hint" style="color:var(--red)">${msg}</div>` : ""}
+      <div class="hint">demo: scorer1 / scorepass</div>
+    </div></div>`;
+}
+async function doLogin() {
+  const user = document.getElementById("u").value.trim();
+  const pass = document.getElementById("p").value;
+  try {
+    const r = await fetch(LOGIN, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user, pass }) });
+    if (!r.ok) return renderLogin("Invalid credentials");
+    const d = await r.json();
+    token = d.token; scorerId = d.scorerId;
+    localStorage.setItem("scorer_token", token); localStorage.setItem("scorer_id", scorerId);
+    boot();
+  } catch { renderLogin("Login failed — is ingestion running?"); }
+}
+
+// ── Send (authenticated) ────────────────────────────────────────────────
+async function send(type, period, payload) {
+  try {
+    const r = await fetch(MANUAL, {
+      method: "POST",
+      headers: { "content-type": "application/json", "authorization": "Bearer " + token },
+      body: JSON.stringify({ matchId: match.id, sportId: match.sport_id, type, period, payload }),
+    });
+    if (r.status === 401) { toast("session expired", true); return logout(); }
+    if (!r.ok) throw new Error(await r.text());
+    toast("✓ " + type); logLine(type, period, payload);
+  } catch (e) { toast("✗ failed", true); console.error(e); }
+}
+function undo() { send("undo_last", {}, {}); }
+
+// ── Match list + selection ──────────────────────────────────────────────
+async function loadMatches() {
+  const list = await (await fetch(`${API}/matches`)).json();
+  const el = document.getElementById("matches"); el.innerHTML = "";
+  list.forEach(m => {
+    const c = document.createElement("div");
+    c.className = "chip"; c.textContent = `${m.sport_id} · ${m.status}`;
+    c.onclick = () => select(m, c); el.appendChild(c);
+  });
+}
+function select(m, chip) {
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  match = m;
+  football = { half: 1, minute: 0 }; tennis = { set: 1 };
+  renderPanel(); connect(m.id);
+}
+
+// ── Panels ──────────────────────────────────────────────────────────────
+function renderPanel() {
+  const s = match.sport_id;
+  if (s === "cricket") return renderCricket();
+  if (s === "football") return renderFootball();
+  if (s === "tennis") return renderTennis();
+  document.getElementById("panel").innerHTML = `<div class="card empty">No scorer UI for ${s} yet.</div>`;
+}
+function shell(inner) {
+  document.getElementById("panel").innerHTML = `
+    <div class="card"><div class="score" id="score">—</div><div class="subline" id="subline"></div></div>
+    <div class="card" style="margin-top:14px">${inner}</div>
+    <div class="card" style="margin-top:14px">
+      <h3>Sent this session <button class="tap undo mini" style="margin-left:auto" onclick="undo()">↶ Undo last</button></h3>
+      <div class="log" id="log"><div class="empty">no events yet</div></div>
+    </div>`;
+}
+
+// Cricket — over/ball DERIVED from authoritative scoreboard (SSE), not a local counter.
+function renderCricket() {
+  shell(`
+    <h3>Ball outcome · next <span id="ballpos"></span></h3>
+    <div class="grid">
+      ${[0,1,2,3].map(r=>`<button class="tap" onclick="ball(${r})">${r}</button>`).join("")}
+      <button class="tap four" onclick="ball(4)">4</button>
+      <button class="tap six" onclick="ball(6)">6</button>
+      <button class="tap w" onclick="wicket()">W</button>
+      <button class="tap extra" onclick="extra('wide')">Wide</button>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <button class="tap extra" onclick="extra('noball')">No Ball</button>
+      <button class="tap extra sm" onclick="newInnings()">New Innings ⇢</button>
+    </div>`);
+  updateBallPos();
+}
+function ballPos() { return { over: Math.floor(cricketBalls / 6), ballInOver: cricketBalls % 6 }; }
+function updateBallPos() { const { over, ballInOver } = ballPos(); const el = document.getElementById("ballpos"); if (el) el.textContent = `${over}.${ballInOver + 1}`; }
+function cricPeriod() { const { over, ballInOver } = ballPos(); return { innings: cricketInnings, over, ball: ballInOver + 1 }; }
+function ball(r) { send("ball", cricPeriod(), { runs: r }); cricketBalls++; updateBallPos(); }         // optimistic; SSE corrects
+function wicket() { send("wicket", cricPeriod(), { dismissal: "bowled" }); cricketBalls++; updateBallPos(); }
+function extra(type) { send("ball", cricPeriod(), { runs: 0, extras: { type, runs: 1 } }); }             // not a legal ball
+function newInnings() { cricketInnings++; cricketBalls = 0; send("innings_start", { innings: cricketInnings }, { battingSide: "B" }); updateBallPos(); }
+
+function renderFootball() {
+  shell(`
+    <h3>Minute
+      <button class="tap mini" onclick="minute(-1)">−</button><span id="min">${football.minute}'</span>
+      <button class="tap mini" onclick="minute(1)">+</button>
+      <button class="tap mini" onclick="toggleHalf()">half <span id="half">${football.half}</span></button>
+    </h3>
+    <div class="grid g2">
+      <button class="tap goal" onclick="goal('home')">GOAL · Home</button>
+      <button class="tap goal" onclick="goal('away')">GOAL · Away</button>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <button class="tap amber sm" onclick="card('home')">Yellow · Home</button>
+      <button class="tap amber sm" onclick="card('away')">Yellow · Away</button>
+    </div>`);
+}
+function minute(d){ football.minute=Math.max(0,football.minute+d); const e=document.getElementById("min"); if(e)e.textContent=football.minute+"'"; }
+function toggleHalf(){ football.half=football.half===1?2:1; const e=document.getElementById("half"); if(e)e.textContent=football.half; }
+function fper(){ return { half: football.half, minute: football.minute }; }
+function goal(side){ const scorer=prompt("Scorer name?", side==="home"?"Home player":"Away player")||"?"; send("goal", fper(), { side, scorer }); }
+function card(side){ send("card", fper(), { side, player: "Player", color: "yellow" }); }
+
+function renderTennis() {
+  shell(`
+    <h3>Point winner · set ${tennis.set}</h3>
+    <div class="grid g2">
+      <button class="tap goal" onclick="point('a')">Point · A</button>
+      <button class="tap goal" onclick="point('b')">Point · B</button>
+    </div>
+    <div class="grid g2" style="margin-top:10px">
+      <button class="tap extra sm" onclick="setWon()">Set complete ⇢</button>
+    </div>`);
+}
+function point(w){ send("point", { set: tennis.set }, { winner: w, serve: { first: true } }); }
+function setWon(){ send("set_won", { set: tennis.set }, {}); tennis.set++; renderTennis(); }
+
+// ── Live score echo via SSE (authoritative). Seeds cricket over/ball. ────
+function connect(id) {
+  if (es) es.close();
+  es = new EventSource(`${RT}/matches/${id}/stream`);
+  const paint = sb => {
+    if (match.sport_id === "cricket") { const i=(sb.innings||[])[(sb.currentInnings||1)-1]||{}; cricketBalls=i.balls??cricketBalls; cricketInnings=sb.currentInnings||cricketInnings; updateBallPos(); }
+    const scoreEl = document.getElementById("score"), sub = document.getElementById("subline");
+    if (!scoreEl) return;
+    if (match.sport_id === "cricket") { const i=(sb.innings||[])[(sb.currentInnings||1)-1]||{}; scoreEl.innerHTML=`${i.runs??0}<small>/${i.wickets??0}</small>`; sub.textContent=`${i.overs??0} overs · RR ${i.runRate??0}`; }
+    else if (match.sport_id === "football") { scoreEl.innerHTML=`${sb.score?.home??0}<small> - </small>${sb.score?.away??0}`; sub.textContent=`${sb.clock?.minute??0}'  half ${sb.clock?.half??1}`; }
+    else if (match.sport_id === "tennis") { const sets=(sb.sets||[]).map(s=>`${s.a}-${s.b}`).join(" "); const g=sb.currentGame||{}; scoreEl.innerHTML=`${sets||"0-0"}<small> · ${g.a??0}-${g.b??0}</small>`; sub.textContent=`serving ${sb.serving||"A"}`; }
+  };
+  es.addEventListener("snapshot", e => paint(JSON.parse(e.data)));
+  es.addEventListener("update",   e => paint(JSON.parse(e.data).scoreboard));
+}
+
+// ── UI helpers ──────────────────────────────────────────────────────────
+function logLine(type, period, payload) {
+  const log = document.getElementById("log"); if (!log) return;
+  if (log.querySelector(".empty")) log.innerHTML = "";
+  const d = document.createElement("div");
+  const isVoid = type === "undo_last" || type === "void";
+  const extra = payload.runs!=null?` ${payload.runs}r`:payload.side?` ${payload.side}`:payload.winner?` ${payload.winner}`:"";
+  d.innerHTML = `<b class="${isVoid?"void":""}">${type}</b>${extra} <span style="float:right">${JSON.stringify(period)}</span>`;
+  log.insertBefore(d, log.firstChild);
+}
+let toastT;
+function toast(msg, err){ const t=document.getElementById("toast"); t.textContent=msg; t.className="toast show"+(err?" err":""); clearTimeout(toastT); toastT=setTimeout(()=>t.className="toast",1000); }
+
+// ── Boot ────────────────────────────────────────────────────────────────
+function boot() {
+  renderWho();
+  if (!token) return renderLogin();
+  document.getElementById("app").innerHTML = `<div class="wrap"><div class="matches" id="matches"></div><div id="panel"><div class="card empty">Pick a match to score.</div></div></div>`;
+  loadMatches();
+}
+boot();
+</script>
+</body>
+</html>
